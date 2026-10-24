@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Computer Graphics Explorables</title>
+<meta name="description" content="Interactive, browser-based teaching modules on computer graphics algorithms: run them live, step through them, and see how GPUs make them fast.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a single reading column; a module shelf of cards, then notes for instructors. */
+:root{
+  --bg:#0b0e14; --bg2:#121722; --bg3:#182030; --line:#263047; --line2:#344059;
+  --fg:#e9ecf3; --mute:#9aa3b6; --dim:#6b7489;
+  --amber:#ffb74a; --cyan:#5fd3ff; --violet:#b48cff;
+  --display:"Chakra Petch","Trebuchet MS",sans-serif;
+  --body:"IBM Plex Sans","Segoe UI",Helvetica,Arial,sans-serif;
+  --mono:"IBM Plex Mono","SFMono-Regular",Consolas,monospace;
+  color-scheme:dark;
+  padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px);
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.6;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 64px}
+a{color:var(--amber)}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+.wrap{max-width:1040px;margin:0 auto}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;line-height:1.1;margin:0}
+h1{font-size:clamp(2.3rem,6vw,4rem);font-weight:700}
+h2{font-size:clamp(1.4rem,3vw,1.9rem);font-weight:600;margin-bottom:.6rem}
+p{margin:0 0 1rem;max-width:68ch}
+.eyebrow{font-family:var(--mono);font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:var(--amber)}
+header{padding-block:56px 36px}
+header .lede{font-size:1.15rem;color:var(--mute);margin-top:16px}
+.raybar{height:3px;margin-top:28px;max-width:420px;background:linear-gradient(90deg,var(--amber) 0 45%,transparent 45% 48%,var(--violet) 48% 74%,transparent 74% 77%,var(--cyan) 77%);border-radius:2px}
+section{padding-block:36px 8px;border-top:1px solid var(--line)}
+.shelf{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:16px;margin-top:8px}
+.card{display:flex;flex-direction:column;gap:10px;border:1px solid var(--line2);border-radius:10px;padding:20px;background:var(--bg2);min-width:0;color:var(--fg);text-decoration:none}
+a.card:hover{border-color:var(--amber)}
+.card .top{display:flex;justify-content:space-between;align-items:baseline;gap:12px}
+.card h3{font-size:1.45rem;font-weight:600}
+.pill{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;padding:2px 8px;border-radius:99px;border:1px solid var(--line2);color:var(--mute);white-space:nowrap}
+.pill.live{border-color:var(--amber);color:var(--amber)}
+.card p{color:var(--mute);margin:0;font-size:.95rem}
+.parts{list-style:none;margin:4px 0 0;padding:0;display:grid;gap:4px;font-size:.9rem;color:var(--mute)}
+.parts li{display:grid;grid-template-columns:62px 1fr;gap:8px}
+.parts b{font-family:var(--mono);font-weight:500;font-size:.78rem;color:var(--dim);padding-top:2px}
+.meta{display:flex;flex-wrap:wrap;gap:6px 14px;font-family:var(--mono);font-size:.74rem;color:var(--dim);margin-top:auto;padding-top:8px;border-top:1px dashed var(--line)}
+.card.soon{background:transparent;border-style:dashed}
+.go{font-family:var(--display);font-weight:600;color:var(--amber)}
+.cols{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:22px}
+.cols>div{min-width:0}
+.cols h3{font-size:1.1rem;margin-bottom:.4rem}
+.cols p{color:var(--mute);font-size:.95rem}
+code{font-family:var(--mono);font-size:.9em;background:var(--bg3);border:1px solid var(--line);border-radius:3px;padding:.05em .35em}
+footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:var(--dim);font-size:.85rem}
+</style>
+</head>
+<body>
+<div class="wrap">
+<header>
+  <div class="eyebrow">Open teaching modules</div>
+  <h1>Computer Graphics Explorables</h1>
+  <p class="lede">Interactive, browser-based lessons on the algorithms behind computer images. Each module runs the real algorithm live, lets you step through it one stage at a time, tells its history, and shows how the graphics card makes it fast. Built for self-study and for use in the classroom.</p>
+  <div class="raybar" aria-hidden="true"></div>
+</header>
+
+<section>
+  <h2>Modules</h2>
+  <div class="shelf">
+    <a class="card" href="ray-tracing/">
+      <div class="top"><h3>Ray Tracing</h3><span class="pill live">Available</span></div>
+      <p>How a picture is made by tracing light backwards from the camera, from Appel's 1968 ray casting to real-time path tracing on RT cores.</p>
+      <ul class="parts">
+        <li><b>Part 1</b><span>A live GPU path tracer you can orbit and tune</span></li>
+        <li><b>Part 2</b><span>One pixel, step by step: reflection, refraction, shadow rays</span></li>
+        <li><b>Part 3</b><span>History, 1525 to 2025</span></li>
+        <li><b>Part 4</b><span>The RT pipeline, BVH traversal, inside an RT core</span></li>
+      </ul>
+      <div class="meta"><span>WebGL 2</span><span>~45–60 min</span><span>Intro to intermediate</span></div>
+      <span class="go">Open module →</span>
+    </a>
+    <div class="card soon">
+      <div class="top"><h3>Gaussian Splatting</h3><span class="pill">In development</span></div>
+      <p>Rendering a captured scene as millions of soft 3D blobs: projection to 2D splats, depth sorting, alpha blending, and how the blobs are fitted from photos.</p>
+      <ul class="parts">
+        <li><b>Planned</b><span>One Gaussian, projection, blending, a live splat scene, training, history</span></li>
+      </ul>
+      <div class="meta"><span>Coming next</span></div>
+    </div>
+  </div>
+</section>
+
+<section>
+  <h2>Using these modules</h2>
+  <div class="cols">
+    <div>
+      <h3>In class</h3>
+      <p>Every module and every part has its own link, for example <code>ray-tracing/#algorithm</code>, so you can put a specific step in a slide, syllabus or LMS page. The step-through diagrams work well projected: press Play and narrate.</p>
+    </div>
+    <div>
+      <h3>For self-study</h3>
+      <p>Work through the parts in order with the Next button or the arrow keys. Each part ends with things to try in the live demos.</p>
+    </div>
+    <div>
+      <h3>Offline or locally</h3>
+      <p>Each module is a single HTML file with no build step. Clone or download the repository and open <code>index.html</code>. Fonts and three.js load from a CDN; everything else is inline.</p>
+    </div>
+  </div>
+</section>
+
+<footer>
+  Code is MIT licensed. Contributions, corrections and module ideas are welcome through issues and pull requests on the GitHub repository.
+</footer>
+</div>
+</body>
+</html>

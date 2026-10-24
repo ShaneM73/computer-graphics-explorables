@@ -1,0 +1,835 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Ray Tracing Explorer · Computer Graphics Explorables</title>
+<meta name="description" content="Interactive explainer: a live GPU path tracer, a step-by-step 3D ray diagram, the history of ray tracing, and how RT cores and BVH traversal work in video cards.">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Chakra+Petch:wght@500;600;700&family=IBM+Plex+Sans:ital,wght@0,400;0,500;0,600;1,400&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: a dark render-viewer page. Full-bleed live GPU render up top, then a reading column
+   with interactive "instrument panels" (3D diagram, BVH tracer) set into the text. */
+:root{
+  --bg:#0b0e14; --bg2:#121722; --bg3:#182030; --line:#263047; --line2:#344059;
+  --fg:#e9ecf3; --mute:#9aa3b6; --dim:#6b7489;
+  --amber:#ffb74a;   /* primary (camera) rays, accent */
+  --cyan:#5fd3ff;    /* shadow rays */
+  --magenta:#ff74b8; /* reflected rays */
+  --violet:#b48cff;  /* refracted rays (through glass) */
+  --green:#67e2a1;   /* hit / visible */
+  --red:#ff6b6b;     /* miss / occluded */
+  --display:"Chakra Petch", "Trebuchet MS", sans-serif;
+  --body:"IBM Plex Sans", "Segoe UI", Helvetica, Arial, sans-serif;
+  --mono:"IBM Plex Mono", "SFMono-Regular", Consolas, monospace;
+  color-scheme: dark;
+}
+*{box-sizing:border-box}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+img{max-width:100%}
+[hidden]{display:none!important}
+html,body{height:auto}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.6;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:0 64px}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+a{color:var(--amber)}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;line-height:1.1;margin:0}
+h1{font-size:clamp(2.2rem,6vw,4.2rem);font-weight:700;letter-spacing:-.01em}
+h2{font-size:clamp(1.6rem,3.5vw,2.4rem);font-weight:600;margin-block:0 .5rem}
+h3{font-size:1.15rem;font-weight:600;margin-block:1.6rem .4rem}
+p{margin:0 0 1rem;max-width:68ch}
+.eyebrow{font-family:var(--mono);font-size:.78rem;letter-spacing:.14em;text-transform:uppercase;color:var(--amber)}
+.mute{color:var(--mute)}
+code,kbd{font-family:var(--mono);font-size:.92em;background:var(--bg2);padding:.08em .35em;border-radius:3px;border:1px solid var(--line)}
+pre{font-family:var(--mono);font-size:.84rem;line-height:1.55;background:var(--bg2);border:1px solid var(--line);border-radius:6px;padding:14px 16px;overflow-x:auto;margin:0}
+
+nav{position:sticky;top:env(safe-area-inset-top,0px);z-index:9;background:color-mix(in srgb,var(--bg) 88%,transparent);backdrop-filter:blur(10px);
+  border-bottom:1px solid var(--line);margin-inline:calc(-1*max(16px,env(safe-area-inset-left,0px))) calc(-1*max(16px,env(safe-area-inset-right,0px)));
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+nav .in{max-width:1180px;margin:0 auto;display:flex;align-items:center;gap:18px;height:50px;overflow-x:auto;white-space:nowrap}
+nav .brand{font-family:var(--display);font-weight:700;letter-spacing:.04em;color:var(--fg);text-decoration:none}
+nav a.l{color:var(--mute);text-decoration:none;font-size:.9rem}
+nav a.l:hover{color:var(--fg)}
+nav .sp{flex:1}
+
+.wrap{max-width:1180px;margin:0 auto}
+.hero{padding-block:40px 20px}
+.hero .lede{font-size:1.15rem;color:var(--mute);max-width:62ch;margin-top:14px}
+
+/* live render panel */
+.panel{background:var(--bg2);border:1px solid var(--line);border-radius:10px;overflow:hidden}
+.viewport{position:relative;background:#000;aspect-ratio:16/9;max-height:72vh;width:100%;max-width:100%}
+.viewport canvas{width:100%;height:100%;display:block;touch-action:pan-y;cursor:grab}
+.viewport canvas:active{cursor:grabbing}
+.hud{position:absolute;left:12px;top:10px;font-family:var(--mono);font-size:.74rem;color:var(--fg);background:rgba(11,14,20,.6);padding:6px 9px;border-radius:5px;line-height:1.5;pointer-events:none}
+.hud b{color:var(--amber);font-weight:500}
+.hint{position:absolute;right:12px;bottom:10px;font-family:var(--mono);font-size:.72rem;color:var(--mute);background:rgba(11,14,20,.6);padding:4px 8px;border-radius:5px;pointer-events:none}
+.fallback{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;padding:24px;text-align:center;color:var(--mute)}
+.controls{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:14px 22px;padding:14px 16px;border-top:1px solid var(--line)}
+.ctl label{display:flex;justify-content:space-between;font-family:var(--mono);font-size:.76rem;color:var(--mute);text-transform:uppercase;letter-spacing:.08em;margin-bottom:4px}
+.ctl label output{color:var(--fg);text-transform:none;letter-spacing:0}
+.ctl input[type=range]{width:100%;accent-color:var(--amber)}
+.ctl select,.btn{width:100%;background:var(--bg3);color:var(--fg);border:1px solid var(--line2);border-radius:5px;padding:6px 8px;font-family:var(--body);font-size:.9rem}
+.btn{cursor:pointer}
+.btn:hover{border-color:var(--amber)}
+.btn.on{border-color:var(--amber);color:var(--amber)}
+:focus-visible{outline:2px solid var(--amber);outline-offset:2px}
+
+section{padding-block:28px 10px}
+.view{display:none}
+.view.on{display:block}
+nav a.l.on{color:var(--amber);border-bottom:2px solid var(--amber);line-height:46px}
+.pager{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:40px;padding-top:18px;border-top:1px solid var(--line)}
+.pager .btn{width:auto;padding:10px 16px;font-family:var(--display);font-weight:600;letter-spacing:.03em}
+.pager .pos{font-family:var(--mono);font-size:.78rem;color:var(--mute);font-variant-numeric:tabular-nums}
+.pager .btn[disabled]{opacity:.35;cursor:default;border-color:var(--line)}
+.toc{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px;margin-top:28px}
+.toc a{display:block;text-decoration:none;color:var(--fg);border:1px solid var(--line2);border-radius:8px;padding:14px 16px;min-width:0}
+.toc a:hover{border-color:var(--amber)}
+.toc .n{font-family:var(--mono);font-size:.7rem;letter-spacing:.12em;text-transform:uppercase;color:var(--amber)}
+.toc .h{font-family:var(--display);font-weight:600;font-size:1.1rem;margin:2px 0 4px}
+.toc p{font-size:.88rem;color:var(--mute);margin:0}
+.cols{display:grid;grid-template-columns:1.1fr .9fr;gap:28px;align-items:start}
+@media (max-width:860px){.cols{grid-template-columns:1fr}}
+.cols>*{min-width:0}
+
+/* key legend */
+.legend{display:flex;flex-wrap:wrap;gap:8px 18px;font-family:var(--mono);font-size:.76rem;color:var(--mute);margin:10px 0 0}
+.legend span::before{content:"";display:inline-block;width:18px;height:3px;border-radius:2px;vertical-align:middle;margin-right:7px;background:var(--c)}
+.legend .dash::before{background:repeating-linear-gradient(90deg,var(--c) 0 5px,transparent 5px 8px)}
+
+/* 3D diagram */
+.diag{position:relative;aspect-ratio:4/3;max-height:560px;background:#070a10}
+.diag canvas{width:100%;height:100%;display:block;touch-action:pan-y;cursor:grab}
+.steps{display:flex;flex-wrap:wrap;gap:6px;padding:12px 14px;border-top:1px solid var(--line)}
+.steps .btn{width:auto;flex:1 1 auto;font-family:var(--mono);font-size:.78rem;padding:7px 9px}
+.steps .btn.on{background:color-mix(in srgb,var(--amber) 14%,var(--bg3))}
+.pixpick{display:grid;grid-template-columns:1fr 1fr;gap:14px 22px;padding:10px 14px 14px;border-top:1px solid var(--line)}
+pre.code .ln{display:block;padding:0 6px;margin:0 -6px;border-radius:3px;color:var(--mute)}
+pre.code .ln.on{background:color-mix(in srgb,var(--amber) 18%,transparent);color:var(--fg)}
+pre.code .ln .k{color:var(--cyan)}
+.readout{font-family:var(--mono);font-size:.82rem;line-height:1.7;background:var(--bg2);border:1px solid var(--line);border-radius:6px;padding:12px 14px;margin-top:12px}
+.readout .row{display:flex;justify-content:space-between;gap:12px;border-bottom:1px dashed var(--line);padding:2px 0}
+.readout .row:last-child{border:0}
+.sw{display:inline-block;width:38px;height:18px;border:1px solid var(--line2);vertical-align:middle;border-radius:3px}
+.picks{display:flex;gap:6px;flex-wrap:wrap}
+.picks .btn{width:auto;font-size:.82rem;padding:5px 10px}
+.journey{list-style:none;margin:12px 0 0;padding:0;display:grid;gap:8px;font-size:.92rem}
+.journey li{display:grid;grid-template-columns:26px 1fr;gap:10px;align-items:start}
+.journey .num{display:inline-flex;width:24px;height:24px;border-radius:50%;border:2px solid var(--fg);align-items:center;justify-content:center;font-family:var(--mono);font-size:.78rem;font-weight:500;margin-top:2px}
+
+/* timeline */
+.tl{list-style:none;margin:20px 0 0;padding:0;position:relative}
+.tl::before{content:"";position:absolute;left:84px;top:0;bottom:0;width:1px;background:var(--line2)}
+.tl li{display:grid;grid-template-columns:70px 1fr;gap:28px;padding:0 0 26px;position:relative}
+.tl li::after{content:"";position:absolute;left:80px;top:9px;width:9px;height:9px;border-radius:50%;background:var(--bg);border:2px solid var(--amber)}
+.tl li.hw::after{background:var(--amber)}
+.tl .yr{font-family:var(--display);font-weight:600;font-size:1.05rem;color:var(--amber);text-align:right;font-variant-numeric:tabular-nums}
+.tl .t{font-weight:600;color:var(--fg)}
+.tl p{margin:2px 0 0;color:var(--mute);font-size:.95rem}
+.tl .tag{display:inline-block;font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;padding:1px 6px;border:1px solid var(--line2);border-radius:3px;color:var(--mute);margin-left:8px;vertical-align:middle}
+.tl li.hw .tag{border-color:var(--amber);color:var(--amber)}
+@media (max-width:600px){.tl::before{left:12px}.tl li{grid-template-columns:1fr;gap:4px;padding-left:34px}.tl li::after{left:8px}.tl .yr{text-align:left}}
+
+/* pipeline */
+.pipe{display:grid;grid-template-columns:repeat(5,1fr);gap:10px;margin:18px 0 10px}
+@media (max-width:860px){.pipe{grid-template-columns:repeat(2,1fr)}}
+.stage{border:1px solid var(--line2);border-radius:6px;padding:12px 12px 10px;min-width:0;position:relative}
+.stage .n{font-family:var(--mono);font-size:.68rem;letter-spacing:.12em;text-transform:uppercase;color:var(--mute)}
+.stage .h{font-family:var(--display);font-weight:600;font-size:1.05rem;margin:2px 0 4px}
+.stage p{font-size:.85rem;color:var(--mute);margin:0}
+.stage.fixed{background:color-mix(in srgb,var(--amber) 12%,var(--bg2));border-color:var(--amber)}
+.stage.fixed .n{color:var(--amber)}
+.pipekey{font-family:var(--mono);font-size:.76rem;color:var(--mute);display:flex;gap:18px;flex-wrap:wrap}
+.pipekey i{display:inline-block;width:14px;height:10px;border:1px solid var(--line2);border-radius:2px;vertical-align:middle;margin-right:6px}
+.pipekey i.f{background:color-mix(in srgb,var(--amber) 25%,var(--bg2));border-color:var(--amber)}
+
+/* bvh */
+.bvhwrap{position:relative;background:#070a10;aspect-ratio:16/8;max-height:460px}
+.bvhwrap canvas{width:100%;height:100%;display:block;cursor:crosshair;touch-action:none}
+.stats{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;padding:12px 14px;border-top:1px solid var(--line)}
+.stat{min-width:0}
+.stat .v{font-family:var(--display);font-size:1.7rem;font-weight:600;font-variant-numeric:tabular-nums;line-height:1}
+.stat .l{font-family:var(--mono);font-size:.7rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);margin-top:4px}
+.stat.g .v{color:var(--green)}.stat.r .v{color:var(--red)}
+.bvhctl{display:flex;gap:8px;flex-wrap:wrap;padding:0 14px 14px}
+.bvhctl .btn{width:auto;font-size:.85rem}
+.bvhctl label{font-size:.85rem;color:var(--mute);display:flex;align-items:center;gap:6px;margin-left:auto}
+
+table{border-collapse:collapse;width:100%;font-size:.9rem;margin-top:14px}
+.tbl{overflow-x:auto}
+th,td{text-align:left;padding:8px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+th{font-family:var(--mono);font-size:.72rem;letter-spacing:.1em;text-transform:uppercase;color:var(--mute);font-weight:500}
+td:first-child{font-family:var(--display);font-weight:600;white-space:nowrap}
+td{color:var(--mute)}
+td b{color:var(--fg);font-weight:500}
+
+.callout{border-left:3px solid var(--amber);background:var(--bg2);padding:12px 16px;border-radius:0 6px 6px 0;margin:18px 0;max-width:72ch}
+.callout p{margin:0}
+.math{font-family:var(--mono);font-size:.95rem;background:var(--bg2);border:1px solid var(--line);padding:12px 16px;border-radius:6px;overflow-x:auto;margin:14px 0}
+footer{margin-top:60px;color:var(--dim);font-size:.85rem;border-top:1px solid var(--line);padding-top:18px}
+@media (prefers-reduced-motion:reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body>
+<nav><div class="in">
+  <a class="l" href="../" title="All modules">← Modules</a><a class="brand" href="#overview">RAY TRACING EXPLORER</a><span class="sp"></span>
+  <a class="l" href="#overview" data-v="overview">Overview</a><a class="l" href="#render" data-v="render">Live render</a><a class="l" href="#algorithm" data-v="algorithm">Algorithm</a><a class="l" href="#history" data-v="history">History</a><a class="l" href="#hardware" data-v="hardware">Hardware</a>
+</div></nav>
+
+<div class="wrap" id="top">
+
+<div class="view" data-view="overview">
+<header class="hero">
+  <div class="eyebrow">Interactive explainer · 5 parts</div>
+  <h1>Light, traced backwards.</h1>
+  <p class="lede">Ray tracing draws a picture by asking one question per pixel: if a line left the camera through this pixel, what would it hit, and how much light reaches that spot? This explorer runs a real path tracer in your GPU's shader cores, walks through the algorithm in 3D one step at a time, traces its 60-year history, and shows how modern video cards wire it into silicon.</p>
+</header>
+<div class="toc">
+  <a href="#render"><div class="n">Part 1</div><div class="h">Live render</div><p>A path tracer running as a fragment shader. Orbit the scene, change bounces, samples and light size, switch debug views.</p></a>
+  <a href="#algorithm"><div class="n">Part 2</div><div class="h">The algorithm</div><p>One pixel, step by step, in a 3D diagram: primary ray, closest hit, shadow ray, reflection, shading.</p></a>
+  <a href="#history"><div class="n">Part 3</div><div class="h">History</div><p>From Dürer's string and Appel's 1968 ray casting to Whitted, Kajiya, RT cores and path-traced games.</p></a>
+  <a href="#hardware"><div class="n">Part 4</div><div class="h">Realization in the GPU</div><p>The ray tracing pipeline, an interactive BVH traversal, what lives inside an RT core, and hybrid rendering.</p></a>
+</div>
+<p class="mute" style="margin-top:28px;font-size:.92rem">Use the tabs above or the Next button at the bottom of each part. Each part has its own link, so you can send someone straight to the BVH demo or the timeline.</p>
+</div>
+
+<div class="view" data-view="render">
+<section>
+  <div class="eyebrow">Part 1 · Live render</div>
+  <h2>A path tracer in your shader cores</h2>
+  <p>Every frame, the fragment shader fires one or more rays through each pixel, bounces them around four spheres (mirror, diffuse, glass, brushed gold) and a checker floor, and averages the result into the previous frames. Noise is the honest state of a ray-traced image; it fades as samples accumulate.</p>
+</section>
+<div class="panel" id="render">
+  <div class="viewport">
+    <canvas id="rt"></canvas>
+    <div class="hud" id="hud">booting shader…</div>
+    <div class="hint">drag to orbit · wheel to zoom</div>
+  </div>
+  <div class="controls">
+    <div class="ctl"><label for="c-bounces">Max bounces <output id="o-bounces">4</output></label><input type="range" id="c-bounces" min="0" max="7" value="4"></div>
+    <div class="ctl"><label for="c-spp">Samples / frame <output id="o-spp">1</output></label><input type="range" id="c-spp" min="1" max="4" value="1"></div>
+    <div class="ctl"><label for="c-light">Light radius <output id="o-light">0.40</output></label><input type="range" id="c-light" min="0.05" max="1.2" step="0.05" value="0.4"></div>
+    <div class="ctl"><label for="c-mode">View</label><select id="c-mode"><option value="0">Final image (path traced)</option><option value="1">Surface normals</option><option value="2">Depth (distance along ray)</option><option value="3">Bounce count heat map</option><option value="4">Albedo only (no lighting)</option></select></div>
+    <div class="ctl"><label for="c-res">Render resolution</label><select id="c-res"><option value="0.5">50%</option><option value="0.75" selected>75%</option><option value="1">100%</option></select></div>
+    <div class="ctl"><label for="c-reset">&nbsp;</label><button class="btn" id="c-reset">Reset view &amp; restart</button></div>
+  </div>
+</div>
+<h3>Things to try</h3>
+<p>Set <b>Max bounces</b> to 0 to see pure ray casting (1968), 1 for Whitted-style shadows and mirrors (1979), and 4+ for full global illumination (1986). Shrink the light to turn soft shadows hard. Switch the view to <b>Bounce count heat map</b>: bright pixels are rays that survived many bounces (glass, and the gaps between spheres); these are the incoherent rays an RT core's reordering hardware exists to tame. <b>Surface normals</b> and <b>Depth</b> are what a hybrid game renderer gets from rasterization for free, without tracing a single ray.</p>
+</div>
+
+<div class="view" data-view="algorithm">
+<section id="algorithm">
+  <div class="eyebrow">Part 2 · The algorithm</div>
+  <h2>One pixel, step by step</h2>
+  <p>Rasterization asks "which pixels does this triangle cover?" Ray tracing flips it: "what does this pixel see?" The rest is geometry. Step through a single pixel below; drag the view to look at the rays from any angle, and change the pixel to see the same logic play out against a different part of the scene.</p>
+  <div class="cols">
+    <div class="panel">
+      <div class="diag"><canvas id="diag"></canvas></div>
+      <div class="steps" id="steps">
+        <button class="btn" data-s="0">0 · Camera &amp; image plane</button>
+        <button class="btn" data-s="1">1 · Primary ray</button>
+        <button class="btn" data-s="2">2 · Closest hit</button>
+        <button class="btn" data-s="3">3 · Follow the ray</button>
+        <button class="btn" data-s="4">4 · Shadow rays</button>
+        <button class="btn" data-s="5">5 · Shade pixel</button>
+        <button class="btn" id="play">▶ Play</button>
+      </div>
+      <div class="pixpick">
+        <div class="ctl" style="grid-column:1/-1"><label>Aim the pixel at</label><div class="picks"><button class="btn" data-pick="glass">Glass sphere</button><button class="btn" data-pick="mirror">Mirror sphere</button><button class="btn" data-pick="matte">Matte sphere</button><button class="btn" data-pick="sky">Sky</button></div></div>
+        <div class="ctl"><label for="px">Pixel column <output id="o-px">0</output></label><input type="range" id="px" min="0" max="15" value="0"></div>
+        <div class="ctl"><label for="py">Pixel row <output id="o-py">0</output></label><input type="range" id="py" min="0" max="9" value="0"></div>
+      </div>
+    </div>
+    <div>
+      <pre class="code" id="pcode"><span class="ln" data-s="0"><span class="k">for</span> each pixel (x, y): image[x,y] = trace(camera.rayThrough(x, y))</span>
+
+<span class="ln" data-s="1"><span class="k">def</span> trace(ray, depth):</span>
+<span class="ln" data-s="2">    hit = scene.closestHit(ray)          <span class="k"># smallest t over all objects</span></span>
+<span class="ln" data-s="2">    <span class="k">if</span> no hit: <span class="k">return</span> sky</span>
+<span class="ln" data-s="3">    <span class="k">if</span> hit.mirror: <span class="k">return</span> 0.85 · trace(reflect(ray, n), depth+1)</span>
+<span class="ln" data-s="3">    <span class="k">if</span> hit.glass:  <span class="k">return</span> (1−F) · trace(refract(ray, n), depth+1)</span>
+<span class="ln" data-s="3">                        +   F   · trace(reflect(ray, n), depth+1)</span>
+<span class="ln" data-s="4">    color = ambient                      <span class="k"># matte surface: gather light</span></span>
+<span class="ln" data-s="4">    <span class="k">if</span> visible(hit.p, light):            <span class="k"># shadow ray</span></span>
+<span class="ln" data-s="4">        color += albedo · max(0, n·l)</span>
+<span class="ln" data-s="5">    <span class="k">return</span> color                         <span class="k"># unwinds back up to the pixel</span></span></pre>
+      <div class="legend"><span style="--c:var(--amber)">primary ray</span><span style="--c:var(--violet)">refracted ray</span><span style="--c:var(--magenta)">reflected ray</span><span class="dash" style="--c:var(--cyan)">shadow ray</span><span style="--c:var(--green)">hit point · normal</span></div>
+      <div class="readout" id="readout"></div>
+      <ol class="journey" id="journey"></ol>
+    </div>
+  </div>
+
+  <h3>How the ray gets around</h3>
+  <p>Numbers in the 3D view match the numbered sentences above. At every surface the ray meets, the material decides what happens next, and the renderer handles it by calling the same <code>trace()</code> function again with a new ray, which is the recursion that made Whitted's method famous:</p>
+  <p><b>Mirror.</b> The ray bounces off with the angle of incidence equal to the angle of reflection, <code>r = d − 2(d·n)n</code>. Whatever the reflected ray sees, scaled by the mirror's reflectivity (0.85 here), becomes this pixel's color.</p>
+  <p><b>Glass.</b> Snell's law bends the ray: <code>n₁ sin θ₁ = n₂ sin θ₂</code>. Entering a denser medium (air → glass, n = 1.5) it bends toward the normal; leaving, it bends away again. The ray crosses the inside of the sphere, exits on the far side and carries on, so what you see "in" the glass is really the scene behind it, displaced. A small Fresnel fraction <code>F</code> (about 4% head-on, rising to 100% at grazing angles) reflects off the surface instead, drawn here as a faint pink ray. If the ray reaches the inner wall too obliquely it cannot exit at all and reflects back inside (total internal reflection).</p>
+  <p><b>Matte.</b> A diffuse surface ends the chain. Its brightness depends on whether it can see the light (one shadow ray) and on the angle between its normal and the light direction, <code>max(0, n·l)</code>.</p>
+  <p>When every recursive call has returned, the colors multiply back down the chain: the matte surface's shaded color is tinted by each glass pass and scaled by each mirror bounce until it reaches the pixel. Press <b>Play</b> to watch the ray extend one segment at a time, or aim the pixel at a different material to compare paths.</p>
+  <p class="mute" style="font-size:.92rem">This is Whitted's 1979 recipe. Replace the single, deterministic secondary ray with a <em>random</em> bounce at every surface, average many of them, and you have Kajiya's path tracing, which the live render in Part 1 runs.</p>
+
+  <h3>Ray–sphere intersection, the whole thing</h3>
+  <p>Almost all of ray tracing is this one computation repeated billions of times. A ray is a point and a direction, <code>p(t) = o + t·d</code>. Substituting it into a sphere's equation gives a quadratic in <code>t</code>; the smallest positive root is the nearest hit.</p>
+  <div class="math">|o + t·d − c|² = r²<br>→ t² + 2t·(d·(o−c)) + |o−c|² − r² = 0<br>→ t = −b ± √(b² − (|o−c|² − r²)),  b = d·(o−c)</div>
+  <p>Triangles use a similar closed form (Möller–Trumbore). The reason GPUs can now put this in hardware is that it is tiny, fixed, and embarrassingly parallel: every pixel, every bounce, independent of all the others.</p>
+
+  <h3>Why it is slow</h3>
+  <p>A 1080p image is about 2 million pixels. One path with 4 bounces plus a shadow ray at each is ~8 rays, so a single sample per pixel is 16 million rays. Smooth images need tens to thousands of samples, and at 60 fps you multiply by 60 again. Each ray must find its nearest hit among millions of triangles, which is why the acceleration structure (Part 3) matters more than the intersection math itself.</p>
+</section>
+</div>
+
+<div class="view" data-view="history">
+<section id="history">
+  <div class="eyebrow">Part 3 · History</div>
+  <h2>From a 74-minute image to 60 frames a second</h2>
+  <p>Ray tracing is older than the GPU. The ideas were mostly settled by 1986; the following thirty years were about making them fast enough. Items marked <span class="tag" style="font-family:var(--mono);font-size:.68rem;letter-spacing:.1em;text-transform:uppercase;padding:1px 6px;border:1px solid var(--amber);border-radius:3px;color:var(--amber)">hardware</span> are the silicon milestones.</p>
+  <ol class="tl">
+    <li><div class="yr">1525</div><div><span class="t">Dürer's perspective machine</span><p>A string from a fixed point on the wall to a point on the lute, passing through a frame: a physical primary ray. The artist marks where it crosses the frame and gets a perspective drawing. The geometry is identical to a modern camera model.</p></div></li>
+    <li><div class="yr">1968</div><div><span class="t">Arthur Appel · ray casting</span><p>Working at IBM, Appel shoots a ray per pixel to find the visible surface and a second ray toward the light to decide if a point is in shadow. No recursion yet. This is "Max bounces = 0" in the render above, plus hard shadows.</p></div></li>
+    <li><div class="yr">1979</div><div><span class="t">Turner Whitted · recursive ray tracing</span><p>At Bell Labs, Whitted makes the hit point spawn new rays: one reflected, one refracted, one toward each light. Mirrors, glass and shadows fall out of a single recursive function. His 512×512 test image reportedly took about 74 minutes on a VAX-11/780. The paper is published in 1980.</p></div></li>
+    <li><div class="yr">1984</div><div><span class="t">Cook, Porter &amp; Carpenter · distributed ray tracing</span><p>Lucasfilm's graphics group jitters the rays: across a lens for depth of field, across time for motion blur, across an area light for soft shadows, across a cone for glossy reflection. Noise becomes an accepted trade for realism.</p></div></li>
+    <li><div class="yr">1986</div><div><span class="t">James Kajiya · the rendering equation and path tracing</span><p>Kajiya writes down the integral every renderer is trying to solve, and proposes solving it by Monte Carlo: follow random paths of light, average. Every "physically based" renderer since is a strategy for sampling this integral with less noise.</p></div></li>
+    <li><div class="yr">1986–87</div><div><span class="t">Acceleration structures</span><p>Kay &amp; Kajiya, Goldsmith &amp; Salmon, and Arvo &amp; Kirk turn nearest-hit search from O(N) to O(log N) with bounding-volume hierarchies and spatial subdivision. The BVH wins in the long run and is what RT cores traverse today.</p></div></li>
+    <li><div class="yr">1996–97</div><div><span class="t">Photon mapping · bidirectional &amp; Metropolis methods</span><p>Henrik Wann Jensen's photon maps and Eric Veach's thesis (multiple importance sampling, bidirectional path tracing, Metropolis light transport) attack the hard cases: caustics, tiny lights, light arriving through a keyhole.</p></div></li>
+    <li><div class="yr">2002</div><div><span class="t">Purcell et al. · ray tracing on programmable GPUs</span><p>Stanford shows a full ray tracer mapped onto the first programmable pixel shaders, treating the GPU as a stream processor. Awkward and slow, but it proves the parallelism fits.</p></div></li>
+    <li class="hw"><div class="yr">2005</div><div><span class="t">Saarland RPU <span class="tag">hardware</span></span><p>Sven Woop, Jörg Schmittler and Philipp Slusallek build the first dedicated ray-tracing processor on an FPGA, with hardware k-d tree traversal. A research prototype, but the blueprint for later RT units.</p></div></li>
+    <li><div class="yr">2006</div><div><span class="t">Monster House · first fully path-traced feature film</span><p>Sony Pictures Imageworks renders the whole film with Arnold. Pixar follows with ray-traced global illumination on Monsters University (2013) and Disney with Hyperion on Big Hero 6 (2014). Film settles on path tracing as the default.</p></div></li>
+    <li><div class="yr">2009–11</div><div><span class="t">NVIDIA OptiX · Intel Embree</span><p>Two production ray-tracing kernels, one for GPUs and one for CPUs. Both are still the core of many renderers. OptiX introduces the shader-stage model (ray generation, intersection, closest-hit, miss) that DXR later standardizes.</p></div></li>
+    <li class="hw"><div class="yr">2018</div><div><span class="t">DirectX Raytracing · NVIDIA Turing RT cores <span class="tag">hardware</span></span><p>Microsoft announces DXR in March. In September NVIDIA ships GeForce RTX 20 with RT cores, fixed-function units for BVH traversal and ray–triangle tests, quoted at ~10 billion rays/s. Battlefield V is the first game with real-time ray-traced reflections in November.</p></div></li>
+    <li class="hw"><div class="yr">2020</div><div><span class="t">Vulkan RT · AMD RDNA 2 · PS5 and Xbox Series X <span class="tag">hardware</span></span><p>Khronos finalizes cross-vendor Vulkan ray tracing. AMD adds a Ray Accelerator to every compute unit in RX 6000, and the same design ships inside both new consoles, so hardware ray tracing becomes a baseline for games. Cyberpunk 2077 and Minecraft RTX arrive.</p></div></li>
+    <li class="hw"><div class="yr">2022</div><div><span class="t">Ada Lovelace · Intel Arc · RDNA 3 <span class="tag">hardware</span></span><p>Third-generation RT cores add Shader Execution Reordering (grouping divergent rays by material), Opacity Micromaps (alpha-tested leaves without a shader call) and Displaced Micro-Meshes. Intel enters with Arc's Ray Tracing Units. Hardware RT is now three vendors wide.</p></div></li>
+    <li><div class="yr">2023</div><div><span class="t">Real-time path tracing in shipped games</span><p>Cyberpunk 2077's Overdrive mode and Alan Wake 2 run full path tracing at a few samples per pixel, made presentable by AI denoisers and ray reconstruction. The 1986 algorithm, at 60 fps, with a lot of help.</p></div></li>
+    <li class="hw"><div class="yr">2025</div><div><span class="t">Blackwell RTX 50 · RDNA 4 <span class="tag">hardware</span></span><p>Fourth-generation RT cores add clustered BVH handling ("Mega Geometry") so ray tracing keeps up with virtualized, per-frame-changing geometry. AMD's third-generation Ray Accelerators widen the tree to 8 children per node and add oriented bounding boxes. Ray tracing reaches handheld consoles.</p></div></li>
+  </ol>
+</section>
+</div>
+
+<div class="view" data-view="hardware">
+<section id="hardware">
+  <div class="eyebrow">Part 4 · Realization in the video card</div>
+  <h2>What the GPU actually does with a ray</h2>
+  <p>A modern graphics card does not "ray trace" the way it rasterizes. Most of the work still runs on the ordinary shader cores. What the RT unit adds is a hardware answer to the one question that dominates the cost: <em>which triangle does this ray hit first?</em> Everything else, deciding what to do at the hit, is programmable.</p>
+
+  <h3>The ray tracing pipeline (DXR / Vulkan RT / OptiX)</h3>
+  <div class="pipe">
+    <div class="stage"><div class="n">01 · shader</div><div class="h">Ray generation</div><p>Runs once per pixel (or per sample). Builds the primary ray and calls <code>TraceRay()</code>. Later, accumulates the result.</p></div>
+    <div class="stage fixed"><div class="n">02 · RT core</div><div class="h">BVH traversal</div><p>Walks the top-level structure (instances) into bottom-level structures (meshes), testing ray against bounding boxes. Fixed-function, no shader involved.</p></div>
+    <div class="stage fixed"><div class="n">03 · RT core</div><div class="h">Ray–triangle test</div><p>At each leaf, intersects the ray with the stored triangles and keeps the nearest. Custom shapes (spheres, curves) fall back to an intersection shader.</p></div>
+    <div class="stage"><div class="n">04 · shader</div><div class="h">Any-hit</div><p>Optional. Called for candidate hits to accept or reject them, mostly for alpha-tested foliage. Opacity micromaps move much of this into hardware.</p></div>
+    <div class="stage"><div class="n">05 · shader</div><div class="h">Closest-hit / Miss</div><p>Runs once the nearest hit is final. Shades the surface, and may call <code>TraceRay()</code> again for shadows or bounces. Miss returns the sky.</p></div>
+  </div>
+  <div class="pipekey"><span><i class="f"></i>fixed-function hardware (RT core / Ray Accelerator)</span><span><i></i>programmable shader stage</span></div>
+
+  <h3>Why the acceleration structure is the whole game</h3>
+  <p>A ray must find its nearest hit among millions of triangles, and brute force means testing every one. A bounding-volume hierarchy wraps triangles in boxes, boxes in bigger boxes, and lets the ray skip entire subtrees whose box it misses. Move your pointer over the scene below to aim the ray; the counters show how many tests the hardware would perform against the brute-force count.</p>
+  <div class="panel">
+    <div class="bvhwrap"><canvas id="bvh"></canvas></div>
+    <div class="stats">
+      <div class="stat"><div class="v" id="s-box">0</div><div class="l">box tests</div></div>
+      <div class="stat g"><div class="v" id="s-tri">0</div><div class="l">triangle tests</div></div>
+      <div class="stat r"><div class="v" id="s-brute">0</div><div class="l">brute force tests</div></div>
+    </div>
+    <div class="bvhctl">
+      <button class="btn" id="b-replay">▶ Replay traversal</button>
+      <button class="btn" id="b-new">New scene</button>
+      <label><input type="checkbox" id="b-show"> show whole hierarchy</label>
+    </div>
+  </div>
+  <p class="mute" style="margin-top:12px;font-size:.92rem">Green boxes were entered, red boxes were rejected with one test. In a real scene with 10 million triangles a ray typically touches a few dozen boxes and a handful of triangles. The RT core holds this traversal loop in silicon: it reads compressed nodes from memory, performs several box tests per clock, and only wakes a shader when a hit is confirmed.</p>
+
+  <h3>Inside an RT core</h3>
+  <div class="cols">
+    <div>
+      <p><b>Box test units</b> evaluate the slab test (ray vs. axis-aligned box) for several children at once; NVIDIA, AMD and Intel all use wide nodes (4 to 8 children) stored in a compressed format so a node fits in one cache line.</p>
+      <p><b>Triangle test units</b> run the ray–triangle intersection and track the current nearest <code>t</code> so later, farther candidates are rejected early.</p>
+      <p><b>A traversal stack</b> lives in dedicated on-chip storage so the shader core isn't juggling it in registers. On AMD RDNA 2/3 the traversal loop itself is still shader code with hardware intersection instructions; RDNA 4 and all NVIDIA generations run the loop in hardware.</p>
+      <p><b>Coherence hardware</b> is the newest piece. Rays leaving neighbouring pixels scatter in different directions and hit different materials, which is poison for SIMD execution. Shader Execution Reordering (Ada and later) sorts live rays by their hit shader before shading so a warp runs one material at a time.</p>
+    </div>
+    <div>
+      <div class="tbl"><table>
+        <tr><th>Generation</th><th>Year</th><th>What changed</th></tr>
+        <tr><td>Turing</td><td>2018</td><td><b>First RT core.</b> BVH traversal + triangle intersection in hardware, GeForce RTX 20.</td></tr>
+        <tr><td>Ampere</td><td>2020</td><td>2× triangle test rate, interpolates triangle position for motion blur.</td></tr>
+        <tr><td>RDNA 2</td><td>2020</td><td><b>AMD Ray Accelerator</b> per compute unit: 4 box or 1 triangle test per clock; traversal in shader. Also in PS5 / Xbox Series.</td></tr>
+        <tr><td>Ada</td><td>2022</td><td>Opacity &amp; displacement micromaps, Shader Execution Reordering, 2× again on intersection.</td></tr>
+        <tr><td>Arc (Xe HPG)</td><td>2022</td><td>Intel Ray Tracing Unit with hardware traversal and a thread-sorting unit for coherence.</td></tr>
+        <tr><td>RDNA 3</td><td>2022</td><td>Hardware ray-box sorting, larger traversal stack, early subtree culling.</td></tr>
+        <tr><td>Blackwell</td><td>2025</td><td>Cluster-based BVH (Mega Geometry) for Nanite-style meshes, linear-swept spheres for hair, 2× again.</td></tr>
+        <tr><td>RDNA 4</td><td>2025</td><td>Hardware traversal, 8-wide nodes, oriented bounding boxes, ~2× per CU.</td></tr>
+      </table></div>
+    </div>
+  </div>
+
+  <h3>How a game frame uses it: hybrid rendering</h3>
+  <p>No shipping game traces every ray. The common frame today is: rasterize the scene into a G-buffer (positions, normals, materials) as before; then trace one or a few rays per pixel for the effects rasterization fakes badly, such as shadows from area lights, reflections of off-screen objects and indirect light. The result is far too noisy to show, so a denoiser, now usually a neural network, reconstructs a clean image from the sparse samples and the G-buffer, and an upscaler fills in resolution. "Path traced" game modes run the same loop with more bounces and lean harder on the denoiser.</p>
+  <div class="callout"><p>Rough budget for 1440p at 60 fps on a current high-end card: ~3.7 million pixels × 60 frames × 2–4 rays ≈ 0.5–1 billion rays a second, each one traversing a BVH of several million triangles. The live render at the top of this page does the same work with no RT core at all, in plain shader code, which is why it needs a second or two to clear up.</p></div>
+
+  <h3>Try it in the live render</h3>
+  <p>Go back to <a href="#render">Part 1</a> and switch the view to <b>Bounce count heat map</b>. Bright pixels are rays that survived many bounces (glass, and the gaps between spheres); these are the rays with poor coherence that an RT core's reordering hardware exists to tame. Switch to <b>Surface normals</b> or <b>Depth</b> and you are looking at what a hybrid renderer gets from the G-buffer for free, without tracing a single ray.</p>
+</section>
+</div>
+
+<div class="pager">
+  <button class="btn" id="pg-prev">‹ Previous</button>
+  <span class="pos" id="pg-pos"></span>
+  <button class="btn" id="pg-next">Next ›</button>
+</div>
+
+<footer>Part of <a href="../">Computer Graphics Explorables</a>, an open set of interactive teaching modules. Everything on this page renders locally in your browser with WebGL via three.js. Sources for the history: Appel (1968), Whitted (1980), Cook et al. (1984), Kajiya (1986), Purcell et al. (2002), Woop et al. (2005), vendor architecture whitepapers for Turing, Ampere, Ada, Blackwell, RDNA 2–4 and Xe HPG.</footer>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script>
+/* view router: one part at a time, addressed by #token */
+(function(){
+const order=['overview','render','algorithm','history','hardware'];
+const titles={overview:'Overview',render:'Part 1 · Live render',algorithm:'Part 2 · Algorithm',history:'Part 3 · History',hardware:'Part 4 · Hardware'};
+const views=[...document.querySelectorAll('.view')];
+const prev=document.getElementById('pg-prev'),next=document.getElementById('pg-next'),pos=document.getElementById('pg-pos');
+let cur='overview';
+function show(v,scroll){
+  if(!order.includes(v)) v='overview';
+  cur=v;
+  views.forEach(el=>el.classList.toggle('on',el.dataset.view===v));
+  document.querySelectorAll('nav a.l').forEach(a=>a.classList.toggle('on',a.dataset.v===v));
+  const i=order.indexOf(v);
+  prev.disabled=i===0; next.disabled=i===order.length-1;
+  prev.textContent=i>0?'‹ '+titles[order[i-1]]:'‹ Previous';
+  next.textContent=i<order.length-1?titles[order[i+1]]+' ›':'Next ›';
+  pos.textContent=(i+1)+' / '+order.length;
+  if(scroll) window.scrollTo(0,0);
+  // canvases inside a hidden view had zero size; let them re-measure now that they are visible
+  requestAnimationFrame(()=>window.dispatchEvent(new Event('resize')));
+}
+function fromHash(){ const h=(location.hash||'').replace('#',''); show(h||'overview',true); }
+window.addEventListener('hashchange',fromHash);
+prev.addEventListener('click',()=>{ const i=order.indexOf(cur); if(i>0) location.hash=order[i-1]; });
+next.addEventListener('click',()=>{ const i=order.indexOf(cur); if(i<order.length-1) location.hash=order[i+1]; });
+document.addEventListener('keydown',e=>{ if(e.target.matches('input,select,textarea')) return; if(e.key==='ArrowRight') next.click(); if(e.key==='ArrowLeft') prev.click(); });
+fromHash();
+})();
+(function(){
+'use strict';
+if(!window.THREE){ document.getElementById('hud').textContent='three.js failed to load'; return; }
+const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+const reduced=window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+/* ------------------------------------------------------------------ */
+/* 1. GPU PATH TRACER (fragment shader)                                 */
+/* ------------------------------------------------------------------ */
+(function(){
+const canvas=document.getElementById('rt'), hud=document.getElementById('hud');
+let renderer;
+try{ renderer=new THREE.WebGLRenderer({canvas,antialias:false,powerPreference:'high-performance'}); }
+catch(e){ hud.textContent='WebGL unavailable'; return; }
+const gl=renderer.getContext();
+const floatOK=renderer.capabilities.isWebGL2&&!!gl.getExtension('EXT_color_buffer_float');
+const rtType=floatOK?THREE.FloatType:THREE.UnsignedByteType;
+const maxAccum=floatOK?3000:200;
+
+const VS='void main(){gl_Position=vec4(position,1.0);}';
+const FS=`
+precision highp float;
+uniform vec2 uRes; uniform float uFrame; uniform vec3 uCamPos; uniform vec3 uCamTarget;
+uniform int uBounces; uniform int uSPP; uniform float uLightR; uniform int uMode; uniform float uBlend;
+uniform sampler2D uPrev;
+#define PI 3.14159265
+#define MAXB 8
+#define NS 4
+vec3 SC[4]; float SR[4]; int SM[4]; vec3 SA[4]; float SG[4];
+const vec3 LPOS=vec3(2.4,4.2,-0.6);
+vec3 LE;
+void setup(){
+  SC[0]=vec3(-2.3,1.0,0.0); SR[0]=1.0; SM[0]=1; SA[0]=vec3(0.93,0.94,0.97); SG[0]=0.03;
+  SC[1]=vec3(0.0,1.0,-1.3); SR[1]=1.0; SM[1]=0; SA[1]=vec3(0.86,0.28,0.16); SG[1]=0.0;
+  SC[2]=vec3(2.3,1.0,0.0);  SR[2]=1.0; SM[2]=2; SA[2]=vec3(0.98,0.99,0.99); SG[2]=0.0;
+  SC[3]=vec3(0.45,0.5,1.7); SR[3]=0.5; SM[3]=1; SA[3]=vec3(0.95,0.72,0.32); SG[3]=0.28;
+  LE=vec3(1.0,0.92,0.78)*(2.4/(uLightR*uLightR));
+}
+float rnd(inout vec2 s){ s+=vec2(0.3137,0.1731); return fract(sin(dot(s,vec2(12.9898,78.233)))*43758.5453); }
+vec3 randUnit(inout vec2 s){ float z=rnd(s)*2.0-1.0; float a=rnd(s)*2.0*PI; float r=sqrt(max(0.0,1.0-z*z)); return vec3(r*cos(a),r*sin(a),z); }
+float iSphere(vec3 ro,vec3 rd,vec3 c,float r){ vec3 oc=ro-c; float b=dot(oc,rd); float cc=dot(oc,oc)-r*r; float h=b*b-cc; if(h<0.0) return -1.0; h=sqrt(h); float t=-b-h; if(t>1e-3) return t; t=-b+h; if(t>1e-3) return t; return -1.0; }
+void hitScene(vec3 ro,vec3 rd,out float t,out int id){
+  t=1e9; id=-1;
+  for(int i=0;i<4;i++){ float s=iSphere(ro,rd,SC[i],SR[i]); if(s>0.0&&s<t){t=s;id=i;} }
+  float s=iSphere(ro,rd,LPOS,uLightR); if(s>0.0&&s<t){t=s;id=4;}
+  if(abs(rd.y)>1e-5){ float tp=-ro.y/rd.y; if(tp>1e-3&&tp<t){ vec3 p=ro+rd*tp; if(abs(p.x)<9.0&&abs(p.z)<9.0){t=tp;id=5;} } }
+}
+vec3 normalAt(vec3 p,int id){ if(id==5) return vec3(0.0,1.0,0.0); if(id==4) return normalize(p-LPOS); return normalize(p-SC[id]); }
+vec3 albedoAt(vec3 p,int id){ if(id==5){ float c=mod(floor(p.x)+floor(p.z),2.0); return c<1.0?vec3(0.72,0.70,0.66):vec3(0.22,0.23,0.26);} if(id==4) return vec3(1.0); return SA[id]; }
+vec3 sky(vec3 rd){ float t=clamp(rd.y*0.8+0.2,0.0,1.0); return mix(vec3(0.22,0.24,0.30),vec3(0.05,0.07,0.12),t)*0.9; }
+vec3 trace(vec3 ro,vec3 rd,inout vec2 seed,out float bc){
+  vec3 col=vec3(0.0), thr=vec3(1.0); bool spec=true; bc=0.0;
+  for(int b=0;b<MAXB+1;b++){
+    if(b>uBounces) break;
+    float t; int id; hitScene(ro,rd,t,id);
+    if(id<0){ col+=thr*sky(rd); break; }
+    bc+=1.0;
+    vec3 p=ro+rd*t; vec3 n=normalAt(p,id);
+    if(id==4){ if(spec) col+=thr*LE; break; }
+    vec3 alb=albedoAt(p,id);
+    int m=(id==5)?0:SM[id]; float g=(id==5)?0.0:SG[id];
+    if(m==0){
+      // next-event estimation toward the spherical light (visible hemisphere)
+      vec3 toL=normalize(LPOS-p); vec3 u=randUnit(seed); if(dot(u,toL)>0.0) u=-u;
+      vec3 lp=LPOS+u*uLightR; vec3 ld=lp-p; float d2=dot(ld,ld); float dist=sqrt(d2); ld/=dist;
+      float ndl=dot(n,ld);
+      if(ndl>0.0){ float ts; int ids; hitScene(p+n*1e-3,ld,ts,ids);
+        if(ids==4){ float cosl=max(dot(u,-ld),0.0); float pdfA=1.0/(2.0*PI*uLightR*uLightR);
+          col+=thr*alb/PI*LE*ndl*cosl/(d2*pdfA); } }
+      rd=normalize(n+randUnit(seed)*0.999); ro=p+n*1e-3; thr*=alb; spec=false;
+    } else if(m==1){
+      vec3 r=reflect(rd,n); rd=normalize(r+g*randUnit(seed)); if(dot(rd,n)<0.0) rd=r; ro=p+n*1e-3; thr*=alb; spec=true;
+    } else {
+      float eta=1.5; vec3 nn=n; bool inside=dot(rd,n)>0.0; if(inside){ nn=-n; eta=1.0/1.5; } else { eta=1.0/eta; }
+      float c=clamp(-dot(rd,nn),0.0,1.0); float f0=0.04; float F=f0+(1.0-f0)*pow(1.0-c,5.0);
+      vec3 rf=refract(rd,nn,eta);
+      if(length(rf)<0.001||rnd(seed)<F){ rd=reflect(rd,nn); ro=p+nn*1e-3; } else { rd=normalize(rf); ro=p-nn*1e-3; }
+      thr*=alb; spec=true;
+    }
+    if(b>=3){ float q=max(thr.r,max(thr.g,thr.b)); if(rnd(seed)>q) break; thr/=max(q,1e-3); }
+  }
+  return col;
+}
+vec3 heat(float x){ x=clamp(x,0.0,1.0); return vec3(smoothstep(0.3,0.9,x), smoothstep(0.0,0.5,x)*(1.0-smoothstep(0.7,1.0,x)*0.4), 1.0-smoothstep(0.1,0.6,x)); }
+void main(){
+  setup();
+  vec2 seed=gl_FragCoord.xy*0.37+vec2(uFrame*7.31,uFrame*3.17);
+  vec3 f=normalize(uCamTarget-uCamPos); vec3 r=normalize(cross(f,vec3(0.0,1.0,0.0))); vec3 u=cross(r,f);
+  float fl=1.0/tan(radians(21.0));
+  vec3 acc=vec3(0.0);
+  for(int s=0;s<NS;s++){
+    if(s>=uSPP) break;
+    vec2 j=vec2(rnd(seed),rnd(seed));
+    vec2 uv=(gl_FragCoord.xy+j-0.5-0.5*uRes)/uRes.y;
+    vec3 rd=normalize(f*fl+uv.x*r+uv.y*u);
+    if(uMode==0){ float bc; acc+=min(trace(uCamPos,rd,seed,bc),vec3(24.0)); }
+    else {
+      float t; int id; hitScene(uCamPos,rd,t,id);
+      if(uMode==1){ acc+= id<0?vec3(0.0):normalAt(uCamPos+rd*t,id)*0.5+0.5; }
+      else if(uMode==2){ acc+= id<0?vec3(0.0):vec3(exp(-t*0.12)); }
+      else if(uMode==4){ acc+= id<0?sky(rd):albedoAt(uCamPos+rd*t,id); }
+      else { float bc; trace(uCamPos,rd,seed,bc); acc+=heat(bc/float(uBounces+1)); }
+    }
+  }
+  acc/=float(uSPP);
+  vec3 prev=texture2D(uPrev,gl_FragCoord.xy/uRes).rgb;
+  gl_FragColor=vec4(mix(prev,acc,uBlend),1.0);
+}`;
+const DISP=`
+precision highp float; uniform sampler2D uTex; uniform vec2 uRes; uniform int uMode;
+vec3 aces(vec3 x){ return clamp((x*(2.51*x+0.03))/(x*(2.43*x+0.59)+0.14),0.0,1.0); }
+void main(){ vec3 c=texture2D(uTex,gl_FragCoord.xy/uRes).rgb; if(uMode==0) c=aces(c*1.1); c=pow(c,vec3(1.0/2.2)); gl_FragColor=vec4(c,1.0); }`;
+
+const cam=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
+const quad=new THREE.PlaneGeometry(2,2);
+const uni={uRes:{value:new THREE.Vector2(1,1)},uFrame:{value:0},uCamPos:{value:new THREE.Vector3()},uCamTarget:{value:new THREE.Vector3(0,0.9,0)},
+  uBounces:{value:4},uSPP:{value:1},uLightR:{value:0.4},uMode:{value:0},uBlend:{value:1},uPrev:{value:null}};
+const traceMat=new THREE.ShaderMaterial({vertexShader:VS,fragmentShader:FS,uniforms:uni,depthTest:false,depthWrite:false});
+const dispU={uTex:{value:null},uRes:{value:uni.uRes.value},uMode:{value:0}};
+const dispMat=new THREE.ShaderMaterial({vertexShader:VS,fragmentShader:DISP,uniforms:dispU,depthTest:false,depthWrite:false});
+const sceneT=new THREE.Scene(); sceneT.add(new THREE.Mesh(quad,traceMat));
+const sceneD=new THREE.Scene(); sceneD.add(new THREE.Mesh(quad,dispMat));
+let rtA=null,rtB=null,frame=0,scale=0.75,w=2,h=2;
+const view={theta:0.55,phi:0.30,r:9.5};
+const t0={theta:0.55,phi:0.30,r:9.5};
+if(window.innerWidth<700){ scale=0.5; document.getElementById('c-res').value='0.5'; }
+
+function makeRT(){ return new THREE.WebGLRenderTarget(w,h,{minFilter:THREE.NearestFilter,magFilter:THREE.NearestFilter,type:rtType,format:THREE.RGBAFormat,depthBuffer:false,stencilBuffer:false}); }
+function resize(){
+  const cw=canvas.clientWidth||640, ch=canvas.clientHeight||360;
+  w=Math.max(2,Math.round(cw*scale)); h=Math.max(2,Math.round(ch*scale));
+  renderer.setPixelRatio(1); renderer.setSize(w,h,false);
+  if(rtA){rtA.dispose();rtB.dispose();}
+  rtA=makeRT(); rtB=makeRT(); uni.uRes.value.set(w,h); frame=0;
+}
+function restart(){ frame=0; }
+function updateCam(){
+  const p=uni.uCamPos.value, t=uni.uCamTarget.value;
+  p.set(t.x+view.r*Math.cos(view.phi)*Math.sin(view.theta), t.y+view.r*Math.sin(view.phi), t.z+view.r*Math.cos(view.phi)*Math.cos(view.theta));
+}
+// orbit
+let drag=false,lx=0,ly=0;
+canvas.addEventListener('pointerdown',e=>{drag=true;lx=e.clientX;ly=e.clientY;canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointermove',e=>{ if(!drag) return; const dx=e.clientX-lx,dy=e.clientY-ly; lx=e.clientX;ly=e.clientY; if(!dx&&!dy) return;
+  view.theta-=dx*0.006; view.phi=clamp(view.phi+dy*0.006,0.02,1.4); updateCam(); restart(); });
+const stop=()=>{drag=false;}; canvas.addEventListener('pointerup',stop); canvas.addEventListener('pointercancel',stop);
+canvas.addEventListener('wheel',e=>{ e.preventDefault(); view.r=clamp(view.r*(1+e.deltaY*0.0012),4,20); updateCam(); restart(); },{passive:false});
+// controls
+const bind=(id,out,fn)=>{ const el=document.getElementById(id); const o=out&&document.getElementById(out); const f=()=>{ fn(el.value); if(o) o.textContent=(+el.value).toFixed(el.step&&el.step.includes('.')?2:0); restart(); }; el.addEventListener('input',f); f(); };
+bind('c-bounces','o-bounces',v=>uni.uBounces.value=+v);
+bind('c-spp','o-spp',v=>uni.uSPP.value=+v);
+bind('c-light','o-light',v=>uni.uLightR.value=+v);
+document.getElementById('c-mode').addEventListener('change',e=>{ uni.uMode.value=+e.target.value; dispU.uMode.value=+e.target.value; restart(); });
+document.getElementById('c-res').addEventListener('change',e=>{ scale=+e.target.value; resize(); });
+document.getElementById('c-reset').addEventListener('click',()=>{ Object.assign(view,t0); updateCam(); restart(); });
+// visibility
+let visible=true; new IntersectionObserver(en=>{visible=en[0].isIntersecting;},{threshold:0.05}).observe(canvas);
+window.addEventListener('resize',resize);
+resize(); updateCam();
+let last=performance.now(), ms=0;
+function loop(now){
+  requestAnimationFrame(loop);
+  if(!visible) return;
+  if(frame<maxAccum){
+    uni.uFrame.value=frame; uni.uBlend.value=1/(frame+1); uni.uPrev.value=rtA.texture;
+    renderer.setRenderTarget(rtB); renderer.render(sceneT,cam);
+    const t=rtA; rtA=rtB; rtB=t; frame++;
+    ms=ms*0.9+(now-last)*0.1;
+  }
+  last=now;
+  dispU.uTex.value=rtA.texture; renderer.setRenderTarget(null); renderer.render(sceneD,cam);
+  if((frame&7)===1||frame>=maxAccum) hud.innerHTML=`<b>${w}×${h}</b> px · <b>${(frame*uni.uSPP.value).toLocaleString()}</b> samples/px${frame>=maxAccum?' (converged)':''}<br>${ms.toFixed(1)} ms/frame · ${floatOK?'fp32':'8-bit'} accumulation · ${uni.uBounces.value===0?'ray casting':uni.uBounces.value===1?'Whitted-style':'path tracing'}`;
+}
+requestAnimationFrame(loop);
+})();
+
+/* ------------------------------------------------------------------ */
+/* 2. 3D ALGORITHM DIAGRAM                                              */
+/* ------------------------------------------------------------------ */
+(function(){
+const canvas=document.getElementById('diag');
+let renderer; try{ renderer=new THREE.WebGLRenderer({canvas,antialias:true}); }catch(e){ return; }
+renderer.shadowMap.enabled=true; renderer.shadowMap.type=THREE.PCFSoftShadowMap;
+renderer.setClearColor(0x070a10);
+const scene=new THREE.Scene();
+const camera=new THREE.PerspectiveCamera(42,4/3,0.1,100);
+const V=THREE.Vector3;
+// scene description (shared by rendering and the ray math)
+const E=new V(0,1.7,6.4), LOOK=new V(0,0.8,0), D=1.5, HW=1.0, HH=0.667, NX=16, NY=10;
+const IOR=1.5, MIRROR_K=0.85;
+const spheres=[
+  {name:'mirror sphere',kind:'mirror',c:new V(-1.91,1.0,1.07),r:1.0,alb:[0.9,0.9,0.95],color:0xdfe3ec},
+  {name:'glass sphere', kind:'glass', c:new V(0.43,0.95,1.21),r:0.95,alb:[0.96,0.98,1.0],color:0xbfe0ff},
+  {name:'red sphere',   kind:'matte', c:new V(1.56,1.0,-2.19),r:1.0,alb:[0.86,0.28,0.18],color:0xdb4a2e},
+  {name:'blue sphere',  kind:'matte', c:new V(-0.76,0.4,2.18),r:0.4,alb:[0.28,0.5,0.95],color:0x4a7ff0}
+];
+const L=new V(2.6,4.3,2.4);
+const FLOOR={name:'checker floor',kind:'matte',alb:[0.55,0.56,0.6]};
+const SKY=[0.25,0.3,0.42];
+const COL={primary:0xffb74a,reflect:0xff74b8,fresnel:0xff74b8,refract:0xb48cff,inside:0xb48cff,exit:0xb48cff,tir:0xb48cff};
+// lights & meshes
+scene.add(new THREE.HemisphereLight(0x8899bb,0x111318,0.55));
+const pl=new THREE.PointLight(0xffe2b0,1.3,40); pl.position.copy(L); pl.castShadow=true; pl.shadow.mapSize.set(1024,1024); pl.shadow.bias=-0.002; scene.add(pl);
+const lamp=new THREE.Mesh(new THREE.SphereGeometry(0.16,16,16),new THREE.MeshBasicMaterial({color:0xffe9b8})); lamp.position.copy(L); scene.add(lamp);
+const floor=new THREE.Mesh(new THREE.PlaneGeometry(24,24),new THREE.MeshStandardMaterial({color:0x1a2130,roughness:0.9})); floor.rotation.x=-Math.PI/2; floor.receiveShadow=true; scene.add(floor);
+const grid=new THREE.GridHelper(24,24,0x2e3a52,0x222a3c); grid.position.y=0.002; scene.add(grid);
+spheres.forEach(s=>{
+  let mat;
+  if(s.kind==='glass') mat=new THREE.MeshPhysicalMaterial({color:s.color,transparent:true,opacity:0.32,roughness:0.05,metalness:0,clearcoat:1,clearcoatRoughness:0.05});
+  else mat=new THREE.MeshStandardMaterial({color:s.color,roughness:s.kind==='mirror'?0.15:0.65,metalness:s.kind==='mirror'?0.9:0});
+  const m=new THREE.Mesh(new THREE.SphereGeometry(s.r,40,28),mat); m.position.copy(s.c); m.castShadow=m.receiveShadow=true; scene.add(m); });
+// eye + image plane
+const eye=new THREE.Mesh(new THREE.SphereGeometry(0.13,16,12),new THREE.MeshBasicMaterial({color:0xffb74a})); eye.position.copy(E); scene.add(eye);
+const plane=new THREE.Group(); plane.position.copy(E).add(LOOK.clone().sub(E).normalize().multiplyScalar(D)); plane.lookAt(E); scene.add(plane);
+plane.updateMatrixWorld(true); // localToWorld needs the world matrix before the first render
+const gridPts=[]; for(let i=0;i<=NX;i++){ const x=-HW+2*HW*i/NX; gridPts.push(new V(x,-HH,0),new V(x,HH,0)); } for(let j=0;j<=NY;j++){ const y=-HH+2*HH*j/NY; gridPts.push(new V(-HW,y,0),new V(HW,y,0)); }
+plane.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(gridPts),new THREE.LineBasicMaterial({color:0x5a6a8a,transparent:true,opacity:0.8})));
+const frustumPts=[]; [[-HW,-HH],[HW,-HH],[HW,HH],[-HW,HH]].forEach(([x,y])=>{ frustumPts.push(plane.localToWorld(new V(x,y,0)),E.clone()); });
+scene.add(new THREE.LineSegments(new THREE.BufferGeometry().setFromPoints(frustumPts),new THREE.LineBasicMaterial({color:0x3a4660})));
+const pix=new THREE.Mesh(new THREE.PlaneGeometry(2*HW/NX,2*HH/NY),new THREE.MeshBasicMaterial({color:0xffb74a,transparent:true,opacity:0.55,side:THREE.DoubleSide})); plane.add(pix);
+const rays=new THREE.Group(); scene.add(rays);
+
+// ---------- ray math ----------
+function iSphere(ro,rd,s){ const oc=ro.clone().sub(s.c); const b=oc.dot(rd); const c=oc.dot(oc)-s.r*s.r; let h=b*b-c; if(h<0) return -1; h=Math.sqrt(h); let t=-b-h; if(t>1e-4) return t; t=-b+h; return t>1e-4?t:-1; }
+function closestHit(ro,rd){
+  let best={t:Infinity,obj:null};
+  spheres.forEach(s=>{ const t=iSphere(ro,rd,s); if(t>0&&t<best.t) best={t,obj:s}; });
+  if(Math.abs(rd.y)>1e-6){ const t=-ro.y/rd.y; if(t>1e-4&&t<best.t){ const p=ro.clone().add(rd.clone().multiplyScalar(t)); if(Math.abs(p.x)<12&&Math.abs(p.z)<12) best={t,obj:FLOOR}; } }
+  if(!best.obj) return null;
+  const p=ro.clone().add(rd.clone().multiplyScalar(best.t)); const n=best.obj===FLOOR?new V(0,1,0):p.clone().sub(best.obj.c).normalize();
+  return {t:best.t,obj:best.obj,p,n,inDir:rd.clone(),name:best.obj.name,alb:best.obj.alb,kind:best.obj.kind};
+}
+function shadowTest(p,n){ const o=p.clone().add(n.clone().multiplyScalar(1e-3)); const d=L.clone().sub(o); const dist=d.length(); d.normalize(); let blocker=null; spheres.forEach(s=>{ const t=iSphere(o,d,s); if(t>0&&t<dist&&(!blocker||t<blocker.t)) blocker={t,s}; }); return {o,dir:d,dist,blocker,end:blocker?o.clone().add(d.clone().multiplyScalar(blocker.t)):L.clone()}; }
+function reflectV(d,n){ return d.clone().sub(n.clone().multiplyScalar(2*d.dot(n))).normalize(); }
+function refractV(d,n,eta){ const cosi=-d.dot(n); const k=1-eta*eta*(1-cosi*cosi); if(k<0) return null; return d.clone().multiplyScalar(eta).add(n.clone().multiplyScalar(eta*cosi-Math.sqrt(k))).normalize(); }
+const deg=r=>Math.round(r*180/Math.PI)+'°';
+const fmt=v=>v.toFixed(2);
+const mul=(c,k)=>c.map(v=>v*k), add=(a,b)=>a.map((v,i)=>v+b[i]);
+function matteShade(hit){ const sh=shadowTest(hit.p,hit.n); const ndl=sh.blocker?0:Math.max(0,hit.n.dot(sh.dir)); return {sh,ndl,color:mul(hit.alb,0.16+0.95*ndl)}; }
+
+// Follow one ray, Whitted-style, recording every segment with a sentence about it.
+function follow(ro,rd,depth,inside,J){
+  const hit=closestHit(ro,rd);
+  const seg={from:ro.clone(),to:hit?hit.p.clone():ro.clone().add(rd.clone().multiplyScalar(12)),kind:depth===0?'primary':(inside?'inside':J.nextKind),hit};
+  J.segments.push(seg);
+  const k=J.segments.length;
+  const note=t=>{ const last=J.notes[J.notes.length-1]; if(last&&last.n===k) last.text+=' '+t; else J.notes.push({n:k,text:t}); };
+  if(!hit){ note((depth===0?'Leaves the camera through the pixel and':'Continues and')+' misses everything. The pixel inherits the sky color.'); return SKY; }
+  if(depth===0) note(`Leaves the camera through pixel (${J.px}, ${J.py}), travels ${fmt(hit.t)} units and meets the ${hit.name} first.`);
+  if(depth>=7){ note('Recursion limit reached; the renderer stops here and returns black.'); return [0,0,0]; }
+  if(inside){
+    // leaving (or bouncing inside) the glass
+    const nIn=hit.n.clone().negate();
+    const out=refractV(rd,nIn,IOR);
+    if(!out){
+      const r=reflectV(rd,nIn); note(`Reaches the inside wall at ${deg(Math.acos(-rd.dot(nIn)))} from the normal, past the critical angle (${deg(Math.asin(1/IOR))}): total internal reflection. It bounces back inside.`);
+      J.nextKind='tir'; return mul(follow(hit.p.clone().add(nIn.clone().multiplyScalar(1e-3)),r,depth+1,true,J),0.96);
+    }
+    note(`Crosses ${fmt(hit.t)} units of glass to the far surface, then exits: leaving the denser medium it bends away from the normal (${deg(Math.acos(-rd.dot(nIn)))} → ${deg(Math.acos(out.dot(hit.n)))}).`);
+    J.nextKind='exit';
+    return mul(follow(hit.p.clone().add(hit.n.clone().multiplyScalar(1e-3)),out,depth+1,false,J),0.96);
+  }
+  if(hit.kind==='matte'){
+    const s=matteShade(hit); J.shadows.push({hit,...s});
+    note((depth===0?'The':'Lands on the '+hit.name+'. The')+' surface is matte, so the recursion ends here: this point’s color is gathered with a shadow ray (step 4).');
+    return s.color;
+  }
+  if(hit.kind==='mirror'){
+    const r=reflectV(rd,hit.n);
+    note((depth===0?'The':'Hits the')+` mirror sphere. Angle in equals angle out (${deg(Math.acos(-rd.dot(hit.n)))}): the ray reflects and the renderer calls trace() again with the new ray, keeping ${MIRROR_K} of whatever it returns.`);
+    J.nextKind='reflect';
+    return mul(follow(hit.p.clone().add(hit.n.clone().multiplyScalar(1e-3)),r,depth+1,false,J),MIRROR_K);
+  }
+  // glass: Fresnel split, follow the refracted ray, draw the reflected one faintly
+  const cos=Math.max(0,-rd.dot(hit.n)); const F=0.04+0.96*Math.pow(1-cos,5);
+  const r=reflectV(rd,hit.n); const rh=closestHit(hit.p.clone().add(hit.n.clone().multiplyScalar(1e-3)),r);
+  const t=refractV(rd,hit.n,1/IOR);
+  note((depth===0?'The':'Reaches the')+` glass sphere (n = ${IOR}). Fresnel splits it: ${Math.round(F*100)}% reflects off the surface (faint pink ray), ${Math.round((1-F)*100)}% refracts in, bending toward the normal (${deg(Math.acos(cos))} → ${deg(Math.acos(-t.dot(hit.n)))}).`);
+  const fres={from:hit.p.clone(),to:rh?rh.p.clone():hit.p.clone().add(r.clone().multiplyScalar(6)),kind:'fresnel',hit:rh,weight:F,at:k};
+  J.extras.push(fres);
+  let rc=SKY; if(rh){ rc=rh.kind==='matte'?matteShade(rh).color:mul(rh.alb,0.5); }
+  J.nextKind='refract';
+  const tc=follow(hit.p.clone().sub(hit.n.clone().multiplyScalar(1e-3)),t,depth+1,true,J);
+  return add(mul(tc,(1-F)*0.96),mul(rc,F));
+}
+function pixelCenter(i,j){ return plane.localToWorld(new V(-HW+2*HW*(i+0.5)/NX, -HH+2*HH*(j+0.5)/NY, 0)); }
+function journey(px,py){ const J={px,py,segments:[],extras:[],shadows:[],notes:[],nextKind:'reflect'}; const rd=pixelCenter(px,py).sub(E).normalize(); J.dir=rd; J.color=follow(E,rd,0,false,J); J.primary=J.segments[0].hit; return J; }
+
+// ---------- drawing helpers ----------
+function line(a,b,color,opts){ opts=opts||{}; const g=new THREE.BufferGeometry().setFromPoints([a,b]); const m=opts.dashed?new THREE.LineDashedMaterial({color,dashSize:0.16,gapSize:0.1,transparent:true,opacity:opts.opacity||1}):new THREE.LineBasicMaterial({color,transparent:!!opts.opacity,opacity:opts.opacity||1}); const l=new THREE.Line(g,m); if(opts.dashed) l.computeLineDistances(); rays.add(l); }
+function dot(p,color,r){ const m=new THREE.Mesh(new THREE.SphereGeometry(r||0.07,12,10),new THREE.MeshBasicMaterial({color})); m.position.copy(p); rays.add(m); }
+function arrow(p,d,color,len){ rays.add(new THREE.ArrowHelper(d,p,len||0.7,color,0.2,0.1)); }
+function tag(p,n){ const c=document.createElement('canvas'); c.width=c.height=64; const x=c.getContext('2d'); x.beginPath(); x.arc(32,32,26,0,6.28); x.fillStyle='#0b0e14'; x.fill(); x.lineWidth=4; x.strokeStyle='#e9ecf3'; x.stroke(); x.fillStyle='#e9ecf3'; x.font='bold 30px IBM Plex Mono, monospace'; x.textAlign='center'; x.textBaseline='middle'; x.fillText(String(n),32,34);
+  const sp=new THREE.Sprite(new THREE.SpriteMaterial({map:new THREE.CanvasTexture(c),depthTest:false,transparent:true})); sp.position.copy(p).add(new V(0,0.22,0)); sp.scale.set(0.34,0.34,1); sp.renderOrder=5; rays.add(sp); }
+function clear(){ while(rays.children.length){ const c=rays.children.pop(); if(c.geometry) c.geometry.dispose(); if(c.material){ if(c.material.map) c.material.map.dispose(); c.material.dispose(); } } }
+
+// ---------- state & update ----------
+let step=1, sub=Infinity, px=0, py=0, J=null;
+const readout=document.getElementById('readout'), journeyEl=document.getElementById('journey');
+const rgb=c=>'rgb('+c.map(v=>Math.round(clamp(v,0,1)*255)).join(',')+')';
+const KIND={primary:'primary ray',reflect:'reflection ray',fresnel:'Fresnel reflection',refract:'refracted ray (entering)',inside:'ray inside the glass',exit:'refracted ray (leaving)',tir:'total internal reflection'};
+function update(){
+  clear();
+  J=journey(px,py);
+  pix.position.set(-HW+2*HW*(px+0.5)/NX,-HH+2*HH*(py+0.5)/NY,0.002);
+  pix.material.color.set(0xffb74a); pix.material.opacity=0.55;
+  const segs=J.segments, p0=segs[0], hit=J.primary;
+  const rows=[['pixel',`(${px}, ${py}) of ${NX}×${NY}`]];
+  const notes=[];
+  if(step>=1){ line(p0.from,p0.to,COL.primary); rows.push(['primary ray',`dir (${fmt(J.dir.x)}, ${fmt(J.dir.y)}, ${fmt(J.dir.z)})`]); }
+  if(step>=2){ if(hit){ dot(hit.p,0x67e2a1,0.08); arrow(hit.p,hit.n,0x67e2a1,0.8); tag(hit.p,1); rows.push(['closest hit',hit.name],['distance t',fmt(hit.t)],['material',hit.kind==='matte'?'matte (diffuse)':hit.kind==='mirror'?'mirror (specular)':'glass (refract + reflect)']); } else { rows.push(['closest hit','none → sky']); } notes.push(J.notes[0]); }
+  if(step>=3){
+    const shown=Math.min(segs.length-1,sub);
+    for(let i=1;i<=shown;i++){ const s=segs[i]; line(s.from,s.to,COL[s.kind]||0xffffff); if(s.hit){ dot(s.hit.p,0x67e2a1,0.06); tag(s.hit.p,i+1); } if(J.notes[i]) notes.push(J.notes[i]); }
+    J.extras.forEach(x=>{ if(x.at<=shown) line(x.from,x.to,COL.fresnel,{opacity:0.35}); });
+    rows.push(['secondary rays',segs.length-1+(segs.length-1===1?' segment':' segments')+(J.extras.length?' + '+J.extras.length+' Fresnel branch':'')]);
+  }
+  if(step>=4){ J.shadows.forEach(s=>{ line(s.sh.o,s.sh.end,s.sh.blocker?0xff6b6b:0x5fd3ff,{dashed:true}); if(s.sh.blocker) dot(s.sh.end,0xff6b6b,0.07);
+      rows.push(['shadow ray @ '+s.hit.name,s.sh.blocker?'blocked by '+s.sh.blocker.s.name+' → in shadow':'reaches the light → lit, n·l = '+fmt(s.ndl)]);
+      notes.push({n:'☼',text:`Shadow ray from the ${s.hit.name}: `+(s.sh.blocker?`blocked by the ${s.sh.blocker.s.name}, so only ambient light remains.`:`nothing in the way, so the point receives light scaled by n·l = ${fmt(s.ndl)}.`)}); });
+    if(!J.shadows.length) notes.push({n:'☼',text:'No matte surface was reached, so there is no shadow ray: the color comes from the sky and the surface tints alone.'}); }
+  if(step>=5){ const c=J.color; pix.material.color.setRGB(clamp(c[0],0,1),clamp(c[1],0,1),clamp(c[2],0,1)); pix.material.opacity=1;
+    rows.push(['pixel color',`<span class="sw" style="background:${rgb(c)}"></span> ${c.map(v=>fmt(v)).join(', ')}`]);
+    notes.push({n:'=',text:'The recursion unwinds: each surface on the path multiplies the color returned from the next ray by its own factor ('+MIRROR_K+' for the mirror, (1−F)·0.96 per glass pass, albedo·light at a matte surface) and the product is written to the pixel.'}); }
+  readout.innerHTML=rows.map(r=>`<div class="row"><span class="mute">${r[0]}</span><span>${r[1]}</span></div>`).join('');
+  journeyEl.innerHTML=notes.map(n=>`<li><span class="num">${n.n}</span><span>${n.text}</span></li>`).join('')||'<li><span class="num">·</span><span>Press Play, or pick a step above, to follow this pixel’s ray.</span></li>';
+  document.querySelectorAll('#steps .btn[data-s]').forEach(b=>b.classList.toggle('on',+b.dataset.s===step));
+  document.querySelectorAll('#pcode .ln').forEach(l=>l.classList.toggle('on',+l.dataset.s===step));
+  document.getElementById('px').value=px; document.getElementById('py').value=py; document.getElementById('o-px').textContent=px; document.getElementById('o-py').textContent=py;
+}
+// choose a pixel that makes a good example of a given material
+function findPixel(kind){
+  let best=null;
+  for(let j=0;j<NY;j++) for(let i=0;i<NX;i++){
+    const Jp=journey(i,j); const h=Jp.primary; const k=h?h.kind:'sky';
+    if(k!==kind) continue;
+    const last=Jp.segments[Jp.segments.length-1].hit;
+    let score=-(Math.abs(i-(NX-1)/2)+Math.abs(j-(NY-1)/2))*0.05;
+    if(kind==='glass'||kind==='mirror'){ const sec=Jp.segments.slice(1); if(sec.some(s=>s.hit&&s.hit.obj!==FLOOR&&s.hit.obj!==h.obj)) score+=3; if(last&&last.obj!==FLOOR) score+=1; score+=Math.min(sec.length,4)*0.5; if(kind==='mirror'&&sec.some(s=>s.kind==='refract')) score+=1; if(sec.some(s=>s.kind==='tir')) score-=1.5; }
+    if(kind==='matte'&&h.obj!==FLOOR) score+=2;
+    if(!best||score>best.score) best={i,j,score};
+  }
+  return best;
+}
+function pick(kind){ const b=findPixel(kind); if(b){ px=b.i; py=b.j; } }
+pick('glass');
+document.querySelectorAll('[data-pick]').forEach(b=>b.addEventListener('click',()=>{ stopPlay(); pick(b.dataset.pick); step=Math.max(step,3); sub=Infinity; update(); }));
+let timer=null; const playBtn=document.getElementById('play');
+function stopPlay(){ if(timer){clearInterval(timer);timer=null;} playBtn.textContent='▶ Play'; playBtn.classList.remove('on'); }
+document.getElementById('steps').addEventListener('click',e=>{ const b=e.target.closest('.btn'); if(!b||b.dataset.s===undefined) return; stopPlay(); step=+b.dataset.s; sub=Infinity; update(); });
+playBtn.addEventListener('click',()=>{ if(timer){stopPlay();return;} step=0; sub=0; update(); playBtn.textContent='■ Stop'; playBtn.classList.add('on');
+  timer=setInterval(()=>{ if(step<3){ step++; sub=0; } else if(step===3&&sub<J.segments.length-1){ sub++; } else if(step<5){ step++; sub=Infinity; } else { stopPlay(); return; } update(); },1400); });
+document.getElementById('px').addEventListener('input',e=>{ stopPlay(); px=+e.target.value; sub=Infinity; update(); });
+document.getElementById('py').addEventListener('input',e=>{ stopPlay(); py=+e.target.value; sub=Infinity; update(); });
+// orbit
+const view={theta:0.75,phi:0.38,r:11.5}, center=new V(0,1,1.8);
+function placeCam(){ camera.position.set(center.x+view.r*Math.cos(view.phi)*Math.sin(view.theta),center.y+view.r*Math.sin(view.phi),center.z+view.r*Math.cos(view.phi)*Math.cos(view.theta)); camera.lookAt(center); }
+let drag=false,lx=0,ly=0;
+canvas.addEventListener('pointerdown',e=>{drag=true;lx=e.clientX;ly=e.clientY;canvas.setPointerCapture(e.pointerId);});
+canvas.addEventListener('pointermove',e=>{ if(!drag) return; view.theta-=(e.clientX-lx)*0.007; view.phi=clamp(view.phi+(e.clientY-ly)*0.007,0.05,1.45); lx=e.clientX; ly=e.clientY; placeCam(); });
+const stop=()=>{drag=false;}; canvas.addEventListener('pointerup',stop); canvas.addEventListener('pointercancel',stop);
+canvas.addEventListener('wheel',e=>{ e.preventDefault(); view.r=clamp(view.r*(1+e.deltaY*0.0012),5,24); placeCam(); },{passive:false});
+function resize(){ const w=canvas.clientWidth||640,h=canvas.clientHeight||480; renderer.setPixelRatio(Math.min(devicePixelRatio,2)); renderer.setSize(w,h,false); camera.aspect=w/h; camera.updateProjectionMatrix(); }
+window.addEventListener('resize',resize); resize(); placeCam();
+let visible=true; new IntersectionObserver(en=>{visible=en[0].isIntersecting;},{threshold:0.05}).observe(canvas);
+step=3; sub=Infinity; update();
+(function loop(){ requestAnimationFrame(loop); if(visible) renderer.render(scene,camera); })();
+})();
+
+/* ------------------------------------------------------------------ */
+/* 3. BVH TRAVERSAL (2D canvas)                                         */
+/* ------------------------------------------------------------------ */
+(function(){
+const cv=document.getElementById('bvh'), ctx=cv.getContext('2d');
+let W=800,H=400,dpr=1,tris=[],root=null,steps=[],shown=0,playing=false,target={x:700,y:170},result=null;
+const N=40;
+const $=id=>document.getElementById(id);
+function resize(){ dpr=Math.min(devicePixelRatio,2); W=cv.clientWidth||800; H=cv.clientHeight||400; cv.width=W*dpr; cv.height=H*dpr; ctx.setTransform(dpr,0,0,dpr,0,0); }
+function rnd(a,b){ return a+Math.random()*(b-a); }
+function makeScene(){ tris=[]; for(let i=0;i<N;i++){ const cx=rnd(W*0.14,W*0.96),cy=rnd(H*0.08,H*0.92),r=rnd(Math.min(W,H)*0.03,Math.min(W,H)*0.07),a=rnd(0,6.28); const p=[]; for(let k=0;k<3;k++){ const ang=a+k*2.094+rnd(-0.4,0.4); p.push({x:cx+Math.cos(ang)*r,y:cy+Math.sin(ang)*r}); } tris.push({p,cx,cy}); }
+  root=build(tris.map((t,i)=>i),0); target={x:W*0.9,y:H*0.45}; }
+function bbox(ids){ let x0=1e9,y0=1e9,x1=-1e9,y1=-1e9; ids.forEach(i=>tris[i].p.forEach(q=>{x0=Math.min(x0,q.x);y0=Math.min(y0,q.y);x1=Math.max(x1,q.x);y1=Math.max(y1,q.y);})); return {x0,y0,x1,y1}; }
+function build(ids,depth){ const b=bbox(ids); if(ids.length<=2||depth>9) return {b,ids,depth}; const ax=(b.x1-b.x0)>(b.y1-b.y0)?'cx':'cy'; ids.sort((p,q)=>tris[p][ax]-tris[q][ax]); const m=ids.length>>1; return {b,depth,l:build(ids.slice(0,m),depth+1),r:build(ids.slice(m),depth+1)}; }
+function rayBox(o,d,b){ let tmin=-1e9,tmax=1e9; for(const [p,dd,lo,hi] of [[o.x,d.x,b.x0,b.x1],[o.y,d.y,b.y0,b.y1]]){ if(Math.abs(dd)<1e-9){ if(p<lo||p>hi) return null; } else { let t1=(lo-p)/dd,t2=(hi-p)/dd; if(t1>t2)[t1,t2]=[t2,t1]; tmin=Math.max(tmin,t1); tmax=Math.min(tmax,t2); if(tmin>tmax) return null; } } return tmax<0?null:Math.max(tmin,0); }
+function raySeg(o,d,a,b){ const ex=b.x-a.x,ey=b.y-a.y; const den=d.x*ey-d.y*ex; if(Math.abs(den)<1e-9) return null; const t=((a.x-o.x)*ey-(a.y-o.y)*ex)/den; const u=((a.x-o.x)*d.y-(a.y-o.y)*d.x)/den; return (t>0&&u>=0&&u<=1)?t:null; }
+function rayTri(o,d,t){ let best=null; for(let k=0;k<3;k++){ const s=raySeg(o,d,t.p[k],t.p[(k+1)%3]); if(s!==null&&(best===null||s<best)) best=s; } return best; }
+function traverse(){ const o={x:14,y:H/2}; const d={x:target.x-o.x,y:target.y-o.y}; const len=Math.hypot(d.x,d.y)||1; d.x/=len; d.y/=len;
+  steps=[]; let closest=Infinity, hitTri=-1; const stack=[root];
+  while(stack.length){ const n=stack.pop(); const t=rayBox(o,d,n.b); const ok=t!==null&&t<closest; steps.push({k:'box',n,ok});
+    if(!ok) continue;
+    if(n.ids){ n.ids.forEach(i=>{ const tt=rayTri(o,d,tris[i]); const h=tt!==null&&tt<closest; steps.push({k:'tri',i,ok:h}); if(h){closest=tt;hitTri=i;} }); }
+    else { const tl=rayBox(o,d,n.l.b),tr=rayBox(o,d,n.r.b); const nearL=(tl===null?1e9:tl)<=(tr===null?1e9:tr); stack.push(nearL?n.r:n.l); stack.push(nearL?n.l:n.r); } }
+  result={o,d,closest,hitTri}; }
+function drawBox(b,color,lw){ ctx.strokeStyle=color; ctx.lineWidth=lw; ctx.strokeRect(b.x0,b.y0,b.x1-b.x0,b.y1-b.y0); }
+function allBoxes(n,f){ f(n); if(n.l){allBoxes(n.l,f);allBoxes(n.r,f);} }
+function draw(){
+  ctx.clearRect(0,0,W,H);
+  if($('b-show').checked) allBoxes(root,n=>drawBox(n.b,'rgba(90,110,150,'+(0.35-n.depth*0.025)+')',1));
+  const tested=new Set(),hitSet=new Set(); let boxT=0,triT=0;
+  for(let i=0;i<Math.min(shown,steps.length);i++){ const s=steps[i]; if(s.k==='box'){ boxT++; drawBox(s.n.b,s.ok?'rgba(103,226,161,.9)':'rgba(255,107,107,.75)',s.ok?1.5:1); } else { triT++; tested.add(s.i); if(s.ok) hitSet.add(s.i); } }
+  tris.forEach((t,i)=>{ ctx.beginPath(); t.p.forEach((q,k)=>k?ctx.lineTo(q.x,q.y):ctx.moveTo(q.x,q.y)); ctx.closePath();
+    const final=shown>=steps.length&&result.hitTri===i; ctx.fillStyle=final?'#ffb74a':hitSet.has(i)?'rgba(255,183,74,.45)':tested.has(i)?'rgba(103,226,161,.35)':'rgba(60,72,100,.55)'; ctx.fill(); ctx.strokeStyle=tested.has(i)?'#67e2a1':'#3a4660'; ctx.lineWidth=1; ctx.stroke(); });
+  const {o,d,closest,hitTri}=result; const end=shown>=steps.length&&hitTri>=0?{x:o.x+d.x*closest,y:o.y+d.y*closest}:{x:o.x+d.x*2000,y:o.y+d.y*2000};
+  ctx.beginPath(); ctx.moveTo(o.x,o.y); ctx.lineTo(end.x,end.y); ctx.strokeStyle='#ffb74a'; ctx.lineWidth=2; ctx.stroke();
+  ctx.beginPath(); ctx.arc(o.x,o.y,5,0,6.28); ctx.fillStyle='#ffb74a'; ctx.fill();
+  if(shown>=steps.length&&hitTri>=0){ ctx.beginPath(); ctx.arc(end.x,end.y,5,0,6.28); ctx.fillStyle='#67e2a1'; ctx.fill(); }
+  ctx.font='12px IBM Plex Mono, monospace'; ctx.fillStyle='#9aa3b6'; ctx.fillText('ray origin',o.x+10,o.y-10); ctx.fillText(shown<steps.length?'step '+shown+' / '+steps.length:(hitTri>=0?'closest hit found':'miss'),14,H-12);
+  $('s-box').textContent=boxT; $('s-tri').textContent=triT; $('s-brute').textContent=N;
+}
+function recompute(instant){ traverse(); shown=instant?steps.length:0; playing=!instant; draw(); }
+let lastTick=0;
+function loop(now){ requestAnimationFrame(loop); if(playing&&now-lastTick>(reduced?0:60)){ lastTick=now; shown++; if(shown>=steps.length) playing=false; draw(); } }
+cv.addEventListener('pointermove',e=>{ const r=cv.getBoundingClientRect(); target={x:e.clientX-r.left,y:e.clientY-r.top}; recompute(true); });
+cv.addEventListener('pointerdown',e=>{ const r=cv.getBoundingClientRect(); target={x:e.clientX-r.left,y:e.clientY-r.top}; recompute(false); });
+$('b-replay').addEventListener('click',()=>recompute(false));
+$('b-new').addEventListener('click',()=>{ makeScene(); recompute(false); });
+$('b-show').addEventListener('change',draw);
+window.addEventListener('resize',()=>{ resize(); makeScene(); recompute(true); });
+resize(); makeScene(); recompute(false); requestAnimationFrame(loop);
+})();
+})();
+</script>
+</body>
+</html>
