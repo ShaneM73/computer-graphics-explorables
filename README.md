@@ -9,7 +9,7 @@ Interactive, browser-based teaching modules on computer graphics algorithms. Eac
 | Module | Status | What it covers |
 |---|---|---|
 | [Ray Tracing](ray-tracing/) | Available | A live GPU path tracer; a step-by-step 3D walkthrough of one pixel (primary, reflected, refracted and shadow rays); history from 1968 to 2025; the DXR/Vulkan ray tracing pipeline, BVH traversal and RT cores |
-| [Gaussian Splatting](gaussian-splatting/) | Available | From drone photos to a real-time splat: keypoints, matching and Structure from Motion; 3D Gaussians and spherical-harmonic colour; EWA projection; tile rasterisation and alpha blending; loss, backpropagation, Adam and densification; a four-Gaussian gradient lab with every derivative shown; quizzes and instructor notes on every step |
+| [Gaussian Splatting](gaussian-splatting/) (Splat Lab) | Available | From drone photos to a real-time splat: keypoints, matching and Structure from Motion; 3D Gaussians and spherical-harmonic colour; EWA projection; tile rasterisation and alpha blending; loss, backpropagation, Adam and densification; a four-Gaussian gradient lab with every derivative shown; quizzes and instructor notes on every step |
 
 ## Using the modules
 
@@ -26,7 +26,7 @@ A current desktop or mobile browser with WebGL 2 (Chrome, Edge, Firefox, Safari)
 ```
 index.html          landing page listing all modules
 ray-tracing/        Ray Tracing module (single HTML file)
-gaussian-splatting/ Gaussian Splatting module (single HTML file)
+gaussian-splatting/ Gaussian Splatting module, Splat Lab (single HTML file)
 .nojekyll           tells GitHub Pages to serve files as-is
 ```
 
