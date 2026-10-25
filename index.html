@@ -79,14 +79,19 @@ footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:v
       <div class="meta"><span>WebGL 2</span><span>~45–60 min</span><span>Intro to intermediate</span></div>
       <span class="go">Open module →</span>
     </a>
-    <div class="card soon">
-      <div class="top"><h3>Gaussian Splatting</h3><span class="pill">In development</span></div>
-      <p>Rendering a captured scene as millions of soft 3D blobs: projection to 2D splats, depth sorting, alpha blending, and how the blobs are fitted from photos.</p>
+    <a class="card" href="gaussian-splatting/">
+      <div class="top"><h3>Gaussian Splatting</h3><span class="pill live">Available</span></div>
+      <p>Rendering a captured scene as millions of soft 3D blobs: projection to 2D splats, depth sorting, alpha blending, and how the blobs are fitted from photos. Built as <b>Splat Lab</b>, a hands-on lab on a synthetic drone survey.</p>
       <ul class="parts">
-        <li><b>Planned</b><span>One Gaussian, projection, blending, a live splat scene, training, history</span></li>
+        <li><b>Start</b><span>Scene setting: frames, units and notation</span></li>
+        <li><b>1–4</b><span>Photos, keypoints, matching, Structure from Motion</span></li>
+        <li><b>5–8</b><span>3D Gaussians, spherical-harmonic colour, EWA projection, tile rasterisation</span></li>
+        <li><b>9–12</b><span>Loss, backprop and Adam, densification, real-time viewing</span></li>
+        <li><b>A–B</b><span>Deep dives: every derivative of one pixel, and backpropagation basics</span></li>
       </ul>
-      <div class="meta"><span>Coming next</span></div>
-    </div>
+      <div class="meta"><span>Canvas + WebGL</span><span>~3 h, 2 sessions</span><span>Intermediate</span></div>
+      <span class="go">Open Splat Lab →</span>
+    </a>
   </div>
 </section>
 
@@ -95,7 +100,7 @@ footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:v
   <div class="cols">
     <div>
       <h3>In class</h3>
-      <p>Every module and every part has its own link, for example <code>ray-tracing/#algorithm</code>, so you can put a specific step in a slide, syllabus or LMS page. The step-through diagrams work well projected: press Play and narrate.</p>
+      <p>Every module and every part has its own link, for example <code>ray-tracing/#algorithm</code>, or <code>gaussian-splatting/#sh</code>, so you can put a specific step in a slide, syllabus or LMS page. The step-through diagrams work well projected: press Play and narrate.</p>
     </div>
     <div>
       <h3>For self-study</h3>
@@ -103,7 +108,7 @@ footer{margin-top:48px;padding-top:18px;border-top:1px solid var(--line);color:v
     </div>
     <div>
       <h3>Offline or locally</h3>
-      <p>Each module is a single HTML file with no build step. Clone or download the repository and open <code>index.html</code>. Fonts and three.js load from a CDN; everything else is inline.</p>
+      <p>Each module is a single HTML file with no build step. Clone or download the repository and open <code>index.html</code>. Fonts, three.js and MathJax load from a CDN; everything else is inline.</p>
     </div>
   </div>
 </section>
