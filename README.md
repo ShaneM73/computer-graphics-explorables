@@ -4,6 +4,8 @@ Interactive, browser-based teaching modules on computer graphics algorithms. Eac
 
 **Live site:** https://shanem73.github.io/computer-graphics-explorables/
 
+**Designer and main contributor:** Prof. Xin (Shane) Miao, Missouri State University ([@ShaneM73](https://github.com/ShaneM73))
+
 ## Modules
 
 | Module | Status | What it covers |
